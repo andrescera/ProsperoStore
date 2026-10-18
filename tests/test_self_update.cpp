@@ -121,7 +121,8 @@ struct Console
         sandbox = sandboxes + "/" + title + "_000";
         registered = root + "/user";
         for (const auto &folder : {drive, drive + "/homebrew", target, target + "/sce_sys",
-                                   target + "/assets", sandboxes, sandbox, registered,
+                                   target + "/assets", sandboxes, sandbox,
+                                   sandbox + "/app0", sandbox + "/data", registered,
                                    registered + "/appmeta", registered + "/appmeta/" + title})
             CHECK(mkdir(folder.c_str(), 0755) == 0);
         write_file(target + "/eboot.bin", "old program");
@@ -144,7 +145,8 @@ struct Console
     }
     void close_app() const
     {
-        CHECK(rmdir(sandbox.c_str()) == 0);
+        // ShellCore removes app0 but leaves the sandbox with its data mount.
+        CHECK(rmdir((sandbox + "/app0").c_str()) == 0);
     }
     bool untouched() const
     {
@@ -658,10 +660,12 @@ void test_swap_rolls_back()
 
     CHECK(self_update::title_running(console.sandboxes, title) == 1);
     console.close_app();
+    // The sandbox stays behind with only its data mount; that is not a running app.
+    CHECK(self_update::kind(console.sandbox) == self_update::Kind::directory);
     CHECK(self_update::title_running(console.sandboxes, title) == 0);
     CHECK(self_update::title_running(console.root + "/nowhere", title) == -1);
     CHECK(self_update::title_running(console.sandboxes, "bad") == -1);
-    CHECK(mkdir(console.sandbox.c_str(), 0755) == 0); // for the fixture's own cleanup
+    CHECK(rmdir((console.sandbox + "/data").c_str()) == 0);
     CHECK(rmdir(console.sandbox.c_str()) == 0);
 }
 } // namespace

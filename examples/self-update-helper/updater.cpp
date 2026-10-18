@@ -425,13 +425,20 @@ int title_running(const std::string &sandboxes, const std::string &title)
     std::vector<std::string> names;
     if (list_entries(sandboxes, 1024, names))
     {
+        // ShellCore leaves the sandbox of an exited title behind, holding only
+        // the data mount. A live application also has app0, so that entry is
+        // what tells a running app from a leftover sandbox.
         for (const auto &name : names)
-            if (name.size() > 10 && name[9] == '_' && name.compare(0, 9, title) == 0)
+            if (name.size() > 10 && name[9] == '_' && name.compare(0, 9, title) == 0 &&
+                kind(sandboxes + "/" + name + "/app0") != Kind::absent)
                 return 1;
         return 0;
     }
     // The folder can't be listed: ask for the usual sandbox by name.
-    return kind(sandboxes + "/" + title + "_000") == Kind::absent ? -1 : 1;
+    const std::string usual = sandboxes + "/" + title + "_000";
+    if (kind(usual) == Kind::absent)
+        return -1;
+    return kind(usual + "/app0") == Kind::absent ? 0 : 1;
 }
 
 bool swap_entries(const std::string &target, const std::string &staged, const std::string &backup)
