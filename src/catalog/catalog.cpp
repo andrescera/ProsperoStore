@@ -157,6 +157,10 @@ bool read_entry(yyjson_val *value, Entry &entry, bool detail)
                 entry.conflicts.emplace_back(yyjson_get_str(other), yyjson_get_len(other));
         }
     }
+    // Optional; anything but a true boolean means the app may go to any location.
+    if (auto *internal = yyjson_obj_get(value, "internalOnly");
+        internal && yyjson_is_bool(internal))
+        entry.internal_only = yyjson_get_bool(internal);
     if (!entry.icon.empty() && !api_url(entry.icon))
         return false;
     if (!entry.large_icon.empty() && !api_url(entry.large_icon))

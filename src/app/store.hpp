@@ -26,6 +26,9 @@
 namespace store
 {
 
+// The console's internal storage, where an app with "internalOnly" in the catalog is installed.
+inline const std::string kInternalLocation = "/data/homebrew";
+
 struct App
 {
     std::string title_id;
@@ -81,6 +84,9 @@ struct Order
     // The install puts this app where another one with the same title ID is: its version need
     // not be newer, because it is a different app.
     bool replace = false;
+    // An app that asks for internal storage was installed elsewhere: once the new copy is in
+    // place, the older one in this location is uninstalled. Empty for every other order.
+    std::string remove_after;
 };
 // What the player chose, kept in /data/prosperostore/settings.txt.
 struct Settings

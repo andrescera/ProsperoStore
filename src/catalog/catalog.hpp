@@ -75,6 +75,9 @@ struct Entry
     std::string id, titleid, name, author, kind, status;
     // The other listed apps with the same title ID: installing this one replaces them.
     std::vector<std::string> conflicts = {};
+    // The developer asked for this app to be installed on the console's internal storage only
+    // ("internalOnly": true in the catalog); false when absent or not true.
+    bool internal_only = false;
     const std::string &console_id() const
     {
         return titleid.empty() ? id : titleid;

@@ -244,9 +244,9 @@ bool Service::load_policy(system::ScanPolicy &out, std::vector<std::string> *not
 }
 
 bool Service::request_install(const catalog::Entry &entry, const std::string &location,
-                              bool replace)
+                              bool replace, const std::string &remove_after)
 {
-    return enqueue({Job::Kind::install, entry, location, replace});
+    return enqueue({Job::Kind::install, entry, location, replace, remove_after});
 }
 
 bool Service::request_adopt(const catalog::Entry &entry, const std::string &location)
@@ -573,6 +573,18 @@ void Service::run_installer()
         hui::sys::log("[STORE] job id=%s operation=%s ok=%d version=%s error=%s %s",
                       job.entry.id.c_str(), result.operation.c_str(), result.ok,
                       result.version.c_str(), result.error.c_str(), result.note.c_str());
+        // The app asked for internal storage and an older copy was elsewhere: now that the new
+        // one is in place, the old one goes. Not unregistered: the title is still installed.
+        std::string old_removed, old_left;
+        if (result.ok && job.kind == Job::Kind::install && !job.remove_after.empty() &&
+            job.remove_after != job.location)
+        {
+            const auto removed = install::uninstall(environment, job.entry.console_id(),
+                                                    job.remove_after, progress_);
+            hui::sys::log("[STORE] old copy id=%s location=%s ok=%d error=%s", job.entry.id.c_str(),
+                          job.remove_after.c_str(), removed.ok, removed.error.c_str());
+            (removed.ok ? old_removed : old_left) = job.remove_after;
+        }
         // An uninstalled app leaves the home screen too. Its own files under
         // /data are not the console's to remove and stay where they are.
         int unregistered = 1;
@@ -590,7 +602,8 @@ void Service::run_installer()
         done.close = result.ok && result.operation == "self-update";
         done.restart = result.ok && result.operation != "self-update" && result.restart;
         // Said in the language in use when it is asked, so the history can say it again.
-        done.describe = [name, result, unregistered]() -> std::pair<std::string, std::string>
+        done.describe = [name, result, unregistered, old_removed,
+                         old_left]() -> std::pair<std::string, std::string>
         {
             std::string message, detail;
             if (result.ok && result.operation == "self-update")
@@ -621,6 +634,12 @@ void Service::run_installer()
                         : "ShadowMountPlus will add it to your home screen in a moment.");
                 if (result.operation == "update" && !result.kept_at.empty())
                     detail = i18n::trf("Previous folder kept in {0}.", {result.kept_at});
+                if (!old_removed.empty())
+                    detail += " " + i18n::trf("The older copy in {0} was removed.", {old_removed});
+                if (!old_left.empty())
+                    detail += " " + i18n::trf("The older copy in {0} could not be removed: "
+                                              "uninstall it from there.",
+                                              {old_left});
             }
             else
             {
