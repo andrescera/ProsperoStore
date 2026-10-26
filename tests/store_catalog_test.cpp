@@ -15,6 +15,9 @@ using namespace store::catalog;
 int main()
 {
     assert(title_id("PPSA99000") && !title_id("PPSA99/00") && !title_id("../PPSA99"));
+    assert(title_id("FAKE77031") && !title_id("F4K377031") && !title_id("fake77031") &&
+           !title_id("CUSA01234") && !title_id("NPXS12345") && !title_id("FAKE7703") &&
+           !title_id("FAKE770311"));
     assert(update_available("01.000.009", "01.000.010"));
     assert(!update_available("01.000.010", "01.000.010"));
     assert(!update_available("02.000.000", "01.999.999"));
@@ -221,6 +224,7 @@ int main()
                            versions, error));
 
     // Two apps can share a title ID: the second is in "shared" and has its own id.
+    assert(record_id("FAKE77031") && record_id("FAKE77031-janedoe") && !record_id("CUSA01234-x"));
     assert(record_id("PPSA99303") && record_id("PPSA99303-swordpdf") && !record_id("PPSA99303-") &&
            !record_id("PPSA99303-Sword") && !record_id("PPSA99303/x") &&
            !record_id("../PPSA99303"));

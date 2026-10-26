@@ -255,7 +255,11 @@ bool record_id(std::string_view value)
 
 bool title_id(std::string_view value)
 {
-    return value.size() == 9 && value.starts_with("PPSA") &&
+    // Four capitals and five digits, as ShadowMountPlus registers them. PS4 (CUSA) and system
+    // (NPXS) titles are not apps of this catalog.
+    return value.size() == 9 && !value.starts_with("CUSA") && !value.starts_with("NPXS") &&
+           std::all_of(value.begin(), value.begin() + 4,
+                       [](char c) { return c >= 'A' && c <= 'Z'; }) &&
            std::all_of(value.begin() + 4, value.end(), [](char c) { return c >= '0' && c <= '9'; });
 }
 
