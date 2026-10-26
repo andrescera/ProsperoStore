@@ -4583,9 +4583,6 @@ void Screen::draw_panel(const ui::Fonts &fonts, std::uint32_t glass)
         }
     }
     list.rounded_rect({under.x + 18.0f, kRoomsY + 21.0f, under.w - 36.0f, 3.0f}, 1.5f, kAccent);
-    if (tabs_focus_)
-        list.bordered_rect(rooms_[panel_tab_].inset(-4.0f), 26, kClear, 3.0f,
-                           kInk.with_alpha(0.94f));
     ui::draw_button(list, fonts, glyphs, ui::Button::r1, rooms_[4].x + rooms_[4].w + 8.0f, kRoomsY,
                     26);
 
