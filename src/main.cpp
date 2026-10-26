@@ -554,7 +554,7 @@ int main()
                                    update.message.c_str(), update.detail.c_str());
 #endif
                 screen.finish_job(update.ok, update.restart, std::move(update.message),
-                                  std::move(update.detail));
+                                  std::move(update.detail), std::move(update.describe));
             }
             else if (update.kind == store::Update::Kind::locations)
                 screen.set_locations(std::move(update.locations));

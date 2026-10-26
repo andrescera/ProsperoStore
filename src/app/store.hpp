@@ -16,6 +16,8 @@
 #include "ui/motion.hpp"
 #include "gfx/draw_list.hpp"
 
+#include <functional>
+#include <tuple>
 #include <map>
 #include <string>
 #include <vector>
@@ -202,7 +204,8 @@ class Screen
     // and the scanned folder new apps go to.
     void set_installer(bool available, bool guard, std::string reason, std::string location);
     void set_activity(Activity activity);
-    void finish_job(bool ok, bool restart, std::string title, std::string body);
+    void finish_job(bool ok, bool restart, std::string title, std::string body,
+                    std::function<std::pair<std::string, std::string>()> describe = {});
     void set_settings(Settings settings)
     {
         active_catalogs_ =
@@ -471,10 +474,13 @@ class Screen
     {
         bool ok = false;
         std::string title, body;
+        // Writes title and body again in the language in use, when it changes.
+        std::function<std::pair<std::string, std::string>()> describe;
     };
     std::vector<Done> history_;
     bool panel_ = false;
     int panel_tab_ = 1, queue_focus_ = 0, queue_first_ = 0, setting_focus_ = 0;
+    bool tabs_focus_ = false; // the panel's focus is on its rooms at the top, not in a room
     hui::tween::Spring panel_value_;
     hui::ui::TextView about_, news_view_;
     std::vector<catalog::News> news_;
@@ -529,6 +535,8 @@ class Screen
     bool fits_stale_ = true, placed_ = false, loading_ = true;
     int counts_[kSections] = {};
     hui::gfx::Rect chips_[kSections] = {};
+    hui::gfx::Rect rooms_[5] = {}; // the panel's rooms, in its top bar
+    float room_size_ = 22.0f;
     std::string status_ = "Connecting to the catalog...";
     system::Inventory inventory_;
     bool inventory_ready_ = false, catalog_current_ = false;
@@ -554,7 +562,7 @@ class Screen
     float time_ = 0.0f, banner_clock_ = 0.0f;
     hui::tween::Spring scroll_, page_, banner_focus_, plate_;
     hui::tween::Timer banner_fade_, swap_;
-    hui::ui::SpringRect ring_, chip_pill_;
+    hui::ui::SpringRect ring_, chip_pill_, room_pill_;
     hui::tween::Spring ring_radius_;
     hui::ui::Pulse nudge_, press_;
     float nudge_x_ = 0.0f, nudge_y_ = 0.0f;

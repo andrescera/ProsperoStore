@@ -118,7 +118,9 @@ constexpr float kRowPitch = kGridTileH + 32.0f;
 constexpr float kViewBottom = 984.0f; // tiles end above the hint row
 constexpr float kFadeFoot = 44.0f;
 constexpr float kFadeHead = 24.0f;
-constexpr float kTabH = 44.0f; // the sections in the top bar
+constexpr float kTabH = 44.0f;    // the sections in the top bar
+constexpr float kRoomsY = 150.0f; // the centre line of the panel's rooms, its own top bar
+constexpr const char *kRoomNames[] = {"Downloads", "Settings", "Catalogs", "About", "News"};
 
 // The product page: key art behind, words on the left, a glass panel on the right.
 constexpr Rect kPageIcon{96.0f, 146.0f, 144.0f, 144.0f};
@@ -348,9 +350,9 @@ Screen::Screen() : theme_(farlight_theme())
     about_.style.panel = false;
     about_.style.focus_ring = false;
     about_.style.padding = 4;
-    about_.set_bounds({636.0f, 350.0f, 1150.0f, 570.0f});
+    about_.set_bounds({136.0f, 414.0f, 1648.0f, 506.0f});
     news_view_.style = about_.style;
-    news_view_.set_bounds({636.0f, 212.0f, 1150.0f, 708.0f});
+    news_view_.set_bounds({136.0f, 276.0f, 1648.0f, 644.0f});
     toasts_.style.theme = theme_;
     toasts_.style.frosted = true;
     toasts_.style.duration = kToastSeconds;
@@ -1267,6 +1269,9 @@ void Screen::refuse(ui::Feedback &feedback, bool repeat, float dx, float dy)
         return;
     feedback.play(audio::Cue::error, 1.0f, 0.0f, 0.6f);
     feedback.rumble(0.25f, 0.05f);
+    // The panel is over the page: the page behind it stays still.
+    if (panel_)
+        return;
     nudge_.trigger();
     nudge_x_ = dx;
     nudge_y_ = dy;
@@ -2020,6 +2025,8 @@ void Screen::update(const InputFrame &raw, float dt, ui::Feedback &feedback)
     ring_radius_.update(dt, 20.0f);
     chip_pill_.target(chips_[section_]);
     chip_pill_.update(dt, 18.0f);
+    room_pill_.target(rooms_[panel_tab_]);
+    room_pill_.update(dt, 18.0f);
     nudge_.update(dt, 9.0f);
     press_.update(dt, 7.0f);
     for (std::size_t k = 0; k < lift_.size(); ++k)
@@ -2078,9 +2085,25 @@ void Screen::layout(const ui::Fonts &fonts)
         chips_[i] = {x, kTopY - kTabH * 0.5f, w, kTabH};
         x += w + kTabGap;
     }
+    // The panel's rooms are laid out the same way, on their own line.
+    float room_words = 0.0f;
+    for (const char *name : kRoomNames)
+        room_words += fonts.semibold.measure(tr(name), 22);
+    const float room_scale =
+        std::clamp((kTabsRoom - kTabGap * 5) / (room_words + kTabPad * 5), 0.72f, 1.0f);
+    room_size_ = 22.0f * room_scale;
+    x = kTabsStart;
+    for (int i = 0; i < 5; ++i)
+    {
+        const float w =
+            fonts.semibold.measure(tr(kRoomNames[i]), room_size_) + kTabPad * room_scale;
+        rooms_[i] = {x, kRoomsY - kTabH * 0.5f, w, kTabH};
+        x += w + kTabGap;
+    }
     if (!placed_)
     {
         // The first frame: the highlights start where they belong, not at the origin.
+        room_pill_.snap(rooms_[panel_tab_]);
         chip_pill_.snap(chips_[section_]);
         ring_.snap(focus_target());
         ring_radius_.snap(focus_radius());
@@ -2817,12 +2840,13 @@ void Screen::set_installer(bool available, bool guard, std::string reason, std::
     install_location_ = std::move(location);
 }
 
-void Screen::finish_job(bool ok, bool restart, std::string title, std::string body)
+void Screen::finish_job(bool ok, bool restart, std::string title, std::string body,
+                        std::function<std::pair<std::string, std::string>()> describe)
 {
     const bool cancelled = title.ends_with(tr(": cancelled"));
     chime_ = ok && !cancelled;
     restart_needed_ = restart_needed_ || restart;
-    history_.push_back({ok, title, body});
+    history_.push_back({ok, title, body, std::move(describe)});
     if (history_.size() > 12)
         history_.erase(history_.begin());
     toasts_.push(ok          ? ui::StatusKind::success
@@ -3958,6 +3982,10 @@ void Screen::apply_language()
     }
     write_about();
     write_news();
+    // What finished is said again too.
+    for (auto &done : history_)
+        if (done.describe)
+            std::tie(done.title, done.body) = done.describe();
 }
 
 std::string Screen::language_value() const
@@ -4017,6 +4045,8 @@ int setting_at(bool catalogs_room, int focus, int catalogs)
 
 void Screen::open_panel(int tab)
 {
+    if (!panel_)
+        tabs_focus_ = false;
     panel_ = true;
     setting_focus_ = 0;
     panel_tab_ = std::clamp(tab, 0, 4);
@@ -4152,6 +4182,33 @@ void Screen::update_panel(const InputFrame &input, ui::Feedback &feedback)
         return;
     }
     const int step = input.nav == Direction::down ? 1 : input.nav == Direction::up ? -1 : 0;
+    if (tabs_focus_)
+    {
+        // The focus is on the rooms at the top: left and right go from one to the next, down
+        // goes back into the room.
+        const int turn = input.nav == Direction::right ? 1 : input.nav == Direction::left ? -1 : 0;
+        if (turn)
+        {
+            const int room = panel_tab_ + turn;
+            if (room < 0 || room > 4)
+            {
+                // A press goes round to the other end; a held button stops at the edge.
+                if (input.nav_repeat)
+                    return refuse(feedback, true, static_cast<float>(turn), 0.0f);
+            }
+            const int next = (room + 5) % 5;
+            open_panel(next);
+            feedback.play(audio::Cue::tab, 0.96f + 0.04f * static_cast<float>(next));
+        }
+        else if (step > 0 || input.is_pressed(Action::confirm))
+        {
+            tabs_focus_ = false;
+            feedback.play(audio::Cue::focus);
+        }
+        else if (step < 0)
+            refuse(feedback, input.nav_repeat, 0.0f, -1.0f);
+        return;
+    }
     if (panel_tab_ == 0)
     {
         // What is running first, then what waits, in order.
@@ -4162,11 +4219,22 @@ void Screen::update_panel(const InputFrame &input, ui::Feedback &feedback)
         const int count = static_cast<int>(ids.size());
         queue_focus_ = std::clamp(queue_focus_, 0, std::max(0, count - 1));
         queue_first_ = std::clamp(queue_first_, 0, std::max(0, count - kQueueRows));
-        if (step && count)
+        if (step)
         {
             const int next = queue_focus_ + step;
-            if (next < 0 || next >= count)
-                return refuse(feedback, input.nav_repeat, 0.0f, static_cast<float>(step));
+            if (next < 0)
+            {
+                tabs_focus_ = true;
+                feedback.play(audio::Cue::focus, 1.16f);
+                return;
+            }
+            if (next >= count)
+            {
+                // Nothing queued: nothing to refuse.
+                if (count)
+                    refuse(feedback, input.nav_repeat, 0.0f, static_cast<float>(step));
+                return;
+            }
             queue_focus_ = next;
             // The window moves only when the focus leaves it, at either end.
             queue_first_ = std::clamp(queue_first_, next - (kQueueRows - 1), next);
@@ -4179,6 +4247,14 @@ void Screen::update_panel(const InputFrame &input, ui::Feedback &feedback)
             pending_order.id = ids[static_cast<std::size_t>(queue_focus_)];
             feedback.play(audio::Cue::select);
         }
+        return;
+    }
+    if ((panel_tab_ == 3 || panel_tab_ == 4) && step < 0 &&
+        (panel_tab_ == 3 ? about_ : news_view_).scroll() <= 0.5f)
+    {
+        // At the top of the text, up goes on to the rooms.
+        tabs_focus_ = true;
+        feedback.play(audio::Cue::focus, 1.16f);
         return;
     }
     if (panel_tab_ == 3)
@@ -4197,7 +4273,13 @@ void Screen::update_panel(const InputFrame &input, ui::Feedback &feedback)
     if (step)
     {
         const int next = setting_focus_ + step;
-        if (next < 0 || next >= kRows)
+        if (next < 0)
+        {
+            tabs_focus_ = true;
+            feedback.play(audio::Cue::focus, 1.16f);
+            return;
+        }
+        if (next >= kRows)
             return refuse(feedback, input.nav_repeat, 0.0f, static_cast<float>(step));
         setting_focus_ = next;
         feedback.play(audio::Cue::focus);
@@ -4471,44 +4553,44 @@ void Screen::draw_panel(const ui::Fonts &fonts, std::uint32_t glass)
     list.push_opacity(tween::smoothstep(t));
     list.push_transform(1.0f, 0, 0, 0, 24.0f * motion() * (1.0f - tween::cubic_out(t)));
 
-    // The left: whose room this is, the room's name, and the five rooms.
-    constexpr const char *kTabs[] = {"Downloads", "Settings", "Catalogs", "About", "News"};
-    constexpr int kTabSigns[] = {0, 1, 11, 2, 30};
-    ui::text(list, fonts.semibold, "PROSPEROSTORE", kMargin, 170.0f, 18, kAccent, gfx::Align::left,
-             4.0f);
-    ui::text(list, fonts.display, tr(kTabs[panel_tab_]), kMargin - 3.0f, 248.0f, 64, kInk);
+    // The top: the five rooms as words, like the home page's sections, the active one lit and a
+    // gold line gliding under it; L1 / R1 at the ends.
+    list.rotated_rect({kMargin + 2.0f, kRoomsY - 11.0f, 22.0f, 22.0f}, 5.0f, 0.7854f, kAccent);
+    list.rotated_rect({kMargin + 8.0f, kRoomsY - 5.0f, 10.0f, 10.0f}, 2.0f, 0.7854f, kDeep);
+    ui::text(list, fonts.semibold, "PROSPEROSTORE", kMargin + 42.0f, centred(kRoomsY, 22), 22, kInk,
+             gfx::Align::left, 5.0f);
+    const auto glyphs = ui::GlyphStyle::dark();
+    ui::draw_button(list, fonts, glyphs, ui::Button::l1,
+                    rooms_[0].x - ui::button_width(ui::Button::l1, 26) - 8.0f, kRoomsY, 26);
+    const Rect under = room_pill_.value();
     for (int i = 0; i < 5; ++i)
     {
-        const Rect entry{kMargin, 300.0f + 66.0f * static_cast<float>(i), 400.0f, 60.0f};
-        const bool on = i == panel_tab_;
-        if (on)
-        {
-            list.rounded_rect(entry, 16, kInk.with_alpha(0.1f));
-            list.rounded_rect({entry.x + 10.0f, entry.y + 16.0f, 4.0f, 28.0f}, 2, kAccent);
-        }
-        sign(list, kTabSigns[i], entry.x + 50.0f, entry.cy(), kInk.with_alpha(on ? 1.0f : 0.55f));
-        ui::text(list, fonts.semibold, tr(kTabs[i]), entry.x + 86.0f, centred(entry.cy(), 24), 24,
-                 kInk.with_alpha(on ? 1.0f : 0.6f));
+        const Rect &room = rooms_[i];
+        const float overlap =
+            std::min(under.x + under.w, room.x + room.w) - std::max(under.x, room.x);
+        const float on = tween::clamp01(overlap / room.w);
+        ui::text(list, fonts.semibold, tr(kRoomNames[i]), room.cx(), centred(kRoomsY, room_size_),
+                 room_size_, kInk.with_alpha(0.52f + 0.48f * on), gfx::Align::center);
         if (i == 4 && !news_.empty() && settings_.news_seen != news_.front().id)
-            pill(list, fonts, tr("New"), entry.x + entry.w - 76.0f, entry.cy(), 30.0f, kAccent,
-                 kOnAccent, 1.0f, kAllLayers);
+            list.circle(room.x + room.w - 12.0f, kRoomsY - 14.0f, 6.0f, kAccent);
         if (i == 0 && (!activity_.id.empty() || !activity_.waiting.empty()))
         {
             const int jobs =
                 (activity_.id.empty() ? 0 : 1) + static_cast<int>(activity_.waiting.size());
-            pill(list, fonts, std::to_string(jobs), entry.x + entry.w - 52.0f, entry.cy(), 30.0f,
-                 kAccent, kOnAccent, 1.0f, kAllLayers);
+            list.circle(room.x + room.w - 10.0f, kRoomsY - 14.0f, 11.0f, kAccent);
+            ui::text(list, fonts.semibold, std::to_string(jobs), room.x + room.w - 10.0f,
+                     centred(kRoomsY - 14.0f, 15), 15, kOnAccent, gfx::Align::center);
         }
     }
-    ui::draw_button(list, fonts, ui::GlyphStyle::dark(), ui::Button::l1, kMargin, 664.0f, 26);
-    ui::draw_button(list, fonts, ui::GlyphStyle::dark(), ui::Button::r1,
-                    kMargin + ui::button_width(ui::Button::l1, 26) + 8.0f, 664.0f, 26);
-    ui::text(list, fonts.regular, tr("Switch rooms"),
-             kMargin + 2.0f * ui::button_width(ui::Button::l1, 26) + 24.0f, centred(664.0f, 20), 20,
-             kInk.with_alpha(0.5f));
+    list.rounded_rect({under.x + 18.0f, kRoomsY + 21.0f, under.w - 36.0f, 3.0f}, 1.5f, kAccent);
+    if (tabs_focus_)
+        list.bordered_rect(rooms_[panel_tab_].inset(-4.0f), 26, kClear, 3.0f,
+                           kInk.with_alpha(0.94f));
+    ui::draw_button(list, fonts, glyphs, ui::Button::r1, rooms_[4].x + rooms_[4].w + 8.0f, kRoomsY,
+                    26);
 
     // The right: one glass panel with the room's content.
-    const Rect panel{600.0f, 144.0f, kRight - 600.0f, 800.0f};
+    const Rect panel{kMargin, 208.0f, kRight - kMargin, 736.0f};
     list.shadow({panel.x, panel.y + 24.0f, panel.w, panel.h}, 32, 60, kBlack.with_alpha(0.45f));
     list.glass(glass, panel, 32, kWhite);
     list.rounded_rect(panel, 32, gfx::mix(kDeep, kMid, 0.14f).with_alpha(0.6f));
@@ -4526,6 +4608,8 @@ void Screen::draw_panel(const ui::Fonts &fonts, std::uint32_t glass)
     };
     const auto row_focus = [&](const Rect &row)
     {
+        if (tabs_focus_)
+            return;
         list.rounded_rect(row, 20, kInk.with_alpha(0.08f));
         list.bordered_rect(row.inset(-4.0f), 24, kClear, 3.0f, kInk.with_alpha(0.94f));
     };
@@ -4616,8 +4700,8 @@ void Screen::draw_panel(const ui::Fonts &fonts, std::uint32_t glass)
         if (!history_.empty())
         {
             list.rounded_rect({px, y + 8.0f, pw, 1.0f}, 0, kInk.with_alpha(0.12f));
-            ui::text(list, fonts.semibold, upper(tr("Finished")), px, y + 52.0f, 16,
-                     kInk.with_alpha(0.55f), gfx::Align::left, 3.5f);
+            ui::text(list, fonts.semibold, upper(tr("Finished")), panel.cx(), y + 52.0f, 16,
+                     kInk.with_alpha(0.55f), gfx::Align::center, 3.5f);
             y += 88.0f;
             const float line_x = px + 14.0f;
             int n = 0;
@@ -4774,17 +4858,15 @@ void Screen::draw_panel(const ui::Fonts &fonts, std::uint32_t glass)
                      1.0f, kAllLayers);
             y += 106.0f;
         }
-        // The notes under the rooms, below "Switch rooms" and inside the left column: some
-        // languages need two lines for each.
-        float note_y = 752.0f;
-        for (const char *note :
-             {"Changes are saved as you make them.", "Catalog changes apply next launch."})
-            note_y = ui::paragraph(list, fonts.regular, tr(note), kMargin, note_y, 20, 440.0f,
-                                   26.0f, kInk.with_alpha(0.5f), 3) +
-                     10.0f;
+        // The notes under the rows, on one line with where the focus is.
+        std::string notes(tr("Changes are saved as you make them."));
+        notes += "  ";
+        notes += tr("Catalog changes apply next launch.");
+        ui::text(list, fonts.regular, fonts.regular.font->fit(notes, 20, pw - 140.0f), px,
+                 panel.y + panel.h - 30.0f, 20, kInk.with_alpha(0.5f));
         ui::text(list, fonts.regular,
-                 std::to_string(setting_focus_ + 1) + " / " + std::to_string(count), kMargin,
-                 note_y + 6.0f, 20, kInk.with_alpha(0.5f));
+                 std::to_string(setting_focus_ + 1) + " / " + std::to_string(count), px + pw,
+                 panel.y + panel.h - 30.0f, 20, kInk.with_alpha(0.5f), gfx::Align::right);
     }
     else if (panel_tab_ == 4)
     {

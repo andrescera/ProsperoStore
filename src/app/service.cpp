@@ -24,6 +24,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <set>
+#include <tuple>
 #include <cerrno>
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -585,45 +586,53 @@ void Service::run_installer()
         done.kind = Update::Kind::job;
         done.entry.id = job.entry.id;
         done.ok = result.ok;
-        const auto &name = job.entry.name.empty() ? job.entry.id : job.entry.name;
-        if (result.ok && result.operation == "self-update")
+        const std::string name = job.entry.name.empty() ? job.entry.id : job.entry.name;
+        done.close = result.ok && result.operation == "self-update";
+        done.restart = result.ok && result.operation != "self-update" && result.restart;
+        // Said in the language in use when it is asked, so the history can say it again.
+        done.describe = [name, result, unregistered]() -> std::pair<std::string, std::string>
         {
-            done.close = true;
-            done.message = i18n::trs("Updating ProsperoStore");
-            done.detail = i18n::trs("It closes now. A notification says when the new version is "
-                                    "in place; then open it again.");
-        }
-        else if (result.ok)
-        {
-            done.restart = result.restart;
-            done.message = i18n::trf(result.operation == "uninstall" ? "{0} uninstalled"
-                                     : result.operation == "adopt"   ? "{0} is now managed"
-                                     : result.operation == "update"  ? "{0} updated"
-                                                                     : "{0} installed",
-                                     {name});
-            done.detail = i18n::trs(
-                result.restart ? "Close ProsperoStore and open it again to finish. If the "
-                                 "old version opens, restart the console first."
-                : result.operation == "uninstall"
-                    ? (unregistered == 0 ? "It is off the home screen. Its saved data stays."
-                                         : "Its saved data stays. Its home-screen tile goes "
-                                           "after a restart.")
-                : result.operation == "adopt" ? "ProsperoStore will offer its updates from now on."
-                : result.operation == "update"
-                    ? "The new version is in place. Give the console a few minutes "
-                      "before starting it."
-                    : "ShadowMountPlus will add it to your home screen in a moment.");
-            if (result.operation == "update" && !result.kept_at.empty())
-                done.detail = i18n::trf("Previous folder kept in {0}.", {result.kept_at});
-        }
-        else
-        {
-            done.message =
-                name + std::string(
-                           i18n::tr(result.error == "Cancelled" ? ": cancelled" : ": not changed"));
-            done.detail =
-                result.error == "Cancelled" ? i18n::trs("Nothing was installed.") : result.error;
-        }
+            std::string message, detail;
+            if (result.ok && result.operation == "self-update")
+            {
+                message = i18n::trs("Updating ProsperoStore");
+                detail = i18n::trs("It closes now. A notification says when the new version is "
+                                   "in place; then open it again.");
+            }
+            else if (result.ok)
+            {
+                message = i18n::trf(result.operation == "uninstall" ? "{0} uninstalled"
+                                    : result.operation == "adopt"   ? "{0} is now managed"
+                                    : result.operation == "update"  ? "{0} updated"
+                                                                    : "{0} installed",
+                                    {name});
+                detail = i18n::trs(
+                    result.restart ? "Close ProsperoStore and open it again to finish. If the "
+                                     "old version opens, restart the console first."
+                    : result.operation == "uninstall"
+                        ? (unregistered == 0 ? "It is off the home screen. Its saved data stays."
+                                             : "Its saved data stays. Its home-screen tile goes "
+                                               "after a restart.")
+                    : result.operation == "adopt"
+                        ? "ProsperoStore will offer its updates from now on."
+                    : result.operation == "update"
+                        ? "The new version is in place. Give the console a few minutes "
+                          "before starting it."
+                        : "ShadowMountPlus will add it to your home screen in a moment.");
+                if (result.operation == "update" && !result.kept_at.empty())
+                    detail = i18n::trf("Previous folder kept in {0}.", {result.kept_at});
+            }
+            else
+            {
+                message =
+                    name + std::string(i18n::tr(result.error == "Cancelled" ? ": cancelled"
+                                                                            : ": not changed"));
+                detail = result.error == "Cancelled" ? i18n::trs("Nothing was installed.")
+                                                     : result.error;
+            }
+            return {std::move(message), std::move(detail)};
+        };
+        std::tie(done.message, done.detail) = done.describe();
         if (broken.empty())
             rescan();
         {

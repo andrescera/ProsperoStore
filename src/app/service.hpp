@@ -9,6 +9,7 @@
 #include "system/inventory.hpp"
 #include <atomic>
 #include <deque>
+#include <functional>
 #include <mutex>
 #include <optional>
 #include <pthread.h>
@@ -47,6 +48,8 @@ struct Update
     system::Inventory installed;
     std::uint64_t generation = 0;
     std::string message;
+    // job: writes message and detail again in the language in use now, for the history
+    std::function<std::pair<std::string, std::string>()> describe;
     bool ok = false;
     bool restart = false; // the store updated itself: restart to finish
     bool close = false;   // the update helper has the go-ahead: the store must close now
