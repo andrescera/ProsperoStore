@@ -414,6 +414,7 @@ class Screen
     void layout(const hui::ui::Fonts &fonts);
     void draw_top_bar(const hui::ui::Fonts &fonts);
     void draw_stage(const hui::ui::Fonts &fonts);
+    void draw_sort_label(const hui::ui::Fonts &fonts, float right, float y);
     void draw_section_header(const hui::ui::Fonts &fonts);
     void draw_tile(const hui::ui::Fonts &fonts, int index, unsigned layers);
     void rows_in_view(float scroll, int &first, int &last) const;

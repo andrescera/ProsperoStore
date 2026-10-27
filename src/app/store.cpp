@@ -112,7 +112,8 @@ constexpr float kLift = 0.06f; // how much the focused tile grows
 constexpr int kColumns = 4;
 constexpr float kGridTileW = (kWidth - 2.0f * kMargin - (kColumns - 1) * kTileGap) / kColumns;
 constexpr float kGridTileH = kGridTileW * 9.0f / 16.0f;
-constexpr float kHeaderY = 206.0f;
+constexpr float kHeaderY =
+    176.0f; // the section title's baseline, above where the tiles are clipped
 constexpr float kGridTop = 248.0f;
 constexpr float kRowPitch = kGridTileH + 32.0f;
 constexpr float kViewBottom = 984.0f; // tiles end above the hint row
@@ -291,6 +292,28 @@ void comment_sign(gfx::DrawList &list, float x, float cy, float size, Color ink)
 std::string likes_text(std::uint32_t count)
 {
     return trn(count, "{0} like", "{0} likes");
+}
+
+// "01.000.113" as "v1.0.113": each part without its leading zeros.
+std::string short_version(const std::string &version)
+{
+    std::string out = "v";
+    std::size_t start = 0;
+    while (start <= version.size())
+    {
+        auto end = version.find('.', start);
+        if (end == std::string::npos)
+            end = version.size();
+        std::string part = version.substr(start, end - start);
+        const auto first = part.find_first_not_of('0');
+        part = first == std::string::npos ? "0" : part.substr(first);
+        out += part;
+        if (end == version.size())
+            break;
+        out += '.';
+        start = end + 1;
+    }
+    return out;
 }
 
 // How many times GitHub has served an app's release file: every download of it, so reinstalls and
@@ -529,11 +552,19 @@ void Screen::rebuild()
         sort_ = Sort::name;
     if (sort_ == Sort::downloaded && !downloads_known())
         sort_ = Sort::name;
+    // Discover has no sorting of its own: its shelves list the apps by when the catalog added
+    // them, the newest first.
+    const bool news = discover();
     std::stable_sort(visible_.begin(), visible_.end(),
                      [&](auto first, auto second)
                      {
                          const auto &a = apps_[first];
                          const auto &b = apps_[second];
+                         if (news && a.added != b.added)
+                             return a.added > b.added;
+                         if (news)
+                             return a.folded_name == b.folded_name ? a.title_id < b.title_id
+                                                                   : a.folded_name < b.folded_name;
                          if (sort_ == Sort::liked && likes(a) != likes(b))
                              return likes(a) > likes(b);
                          if (sort_ == Sort::downloaded &&
@@ -1392,7 +1423,7 @@ void Screen::update_home(const InputFrame &input, ui::Feedback &feedback)
         feedback.play(audio::Cue::select);
         return;
     }
-    if (input.is_pressed(Action::r3))
+    if (input.is_pressed(Action::r3) && !discover())
     {
         // "Most liked" and "Most downloaded" join the orders once their numbers are known.
         std::vector<Sort> orders{Sort::name, Sort::released, Sort::updated};
@@ -2214,6 +2245,9 @@ void Screen::draw_top_bar(const ui::Fonts &fonts)
     list.rotated_rect({kMargin + 8.0f, kTopY - 5.0f, 10.0f, 10.0f}, 2.0f, 0.7854f, kDeep);
     const float brand = ui::text(list, fonts.semibold, "PROSPEROSTORE", kMargin + 42.0f,
                                  centred(kTopY, 22), 22, kInk, gfx::Align::left, 5.0f);
+    if (!self_version_.empty())
+        ui::text(list, fonts.semibold, short_version(self_version_), kMargin + 42.0f + brand,
+                 centred(kTopY + 22.0f, 11), 11, kInk.with_alpha(0.5f), gfx::Align::right, 2.5f);
     // Where the apps come from, said once and quietly beside the name.
     const float x = kMargin + 42.0f + brand + 20.0f;
     list.rounded_rect({x, kTopY - 11.0f, 1.5f, 22.0f}, 0, kInk.with_alpha(0.25f));
@@ -2417,6 +2451,21 @@ void Screen::draw_stage(const ui::Fonts &fonts)
     }
 }
 
+// "Sorted by ..." with the stick's glyph, its right edge at `right`.
+void Screen::draw_sort_label(const ui::Fonts &fonts, float right, float y)
+{
+    auto &list = scene_;
+    const std::string_view sort_name = tr(sort_ == Sort::name         ? "Name"
+                                          : sort_ == Sort::released   ? "Newest release"
+                                          : sort_ == Sort::liked      ? "Most liked"
+                                          : sort_ == Sort::downloaded ? "Most downloaded"
+                                                                      : "Recently updated");
+    const float tw = ui::text(list, fonts.regular, trf("Sorted by {0}", {sort_name}), right, y, 22,
+                              kInk.with_alpha(0.6f), gfx::Align::right);
+    ui::draw_button(list, fonts, ui::GlyphStyle::dark(), ui::Button::right_stick,
+                    right - tw - 46.0f, y - 8.0f, 30);
+}
+
 // The other sections: a big title, its count and the order, over the
 // focused app's key art far back.
 void Screen::draw_section_header(const ui::Fonts &fonts)
@@ -2450,20 +2499,25 @@ void Screen::draw_section_header(const ui::Fonts &fonts)
     const bool all = section_ == 6 && !visible_.empty() && installer_ && guard_;
     if (!developer_.empty())
     {
-        // The developer's code, where the sorting is said on other pages.
+        // The developer's code sits at the right; the sorting is said to its left.
+        float sort_right = kRight, sort_y = kHeaderY - 8.0f;
         if (developer_qr_ != 0 && !developer_link_.empty() && developer_qr_link_ == developer_link_)
         {
-            const Rect code{kRight - 84.0f, kHeaderY - 62.0f, 84.0f, 84.0f};
+            const Rect code{kRight - 84.0f, kHeaderY - 74.0f, 84.0f, 84.0f};
             list.rounded_rect(code.inset(-6.0f), 12, kWhite);
             list.image(developer_qr_, code, gfx::kFullUv, kWhite);
             const std::string line = trs(developer_support_ ? "Scan to support this developer"
                                                             : "Scan for this developer's page");
             ui::text(list, fonts.semibold, line, code.x - 24.0f, kHeaderY - 26.0f, 20,
                      kInk.with_alpha(0.86f), gfx::Align::right);
-            ui::text(list, fonts.mono, fonts.mono.font->fit(developer_link_, 17, 520.0f),
-                     code.x - 24.0f, kHeaderY + 4.0f, 17, kInk.with_alpha(0.55f),
-                     gfx::Align::right);
+            const std::string link = fonts.mono.font->fit(developer_link_, 17, 520.0f);
+            ui::text(list, fonts.mono, link, code.x - 24.0f, kHeaderY + 4.0f, 17,
+                     kInk.with_alpha(0.55f), gfx::Align::right);
+            // Above the QR's caption.
+            sort_right = code.x - 24.0f;
+            sort_y = kHeaderY - 54.0f;
         }
+        draw_sort_label(fonts, sort_right, sort_y);
     }
     else if (all)
     {
@@ -2479,15 +2533,7 @@ void Screen::draw_section_header(const ui::Fonts &fonts)
     }
     else
     {
-        const std::string_view sort_name = tr(sort_ == Sort::name         ? "Name"
-                                              : sort_ == Sort::released   ? "Newest release"
-                                              : sort_ == Sort::liked      ? "Most liked"
-                                              : sort_ == Sort::downloaded ? "Most downloaded"
-                                                                          : "Recently updated");
-        const float tw = ui::text(list, fonts.regular, trf("Sorted by {0}", {sort_name}), kRight,
-                                  kHeaderY - 8.0f, 22, kInk.with_alpha(0.6f), gfx::Align::right);
-        ui::draw_button(list, fonts, ui::GlyphStyle::dark(), ui::Button::right_stick,
-                        kRight - tw - 46.0f, kHeaderY - 16.0f, 30);
+        draw_sort_label(fonts, kRight, kHeaderY - 8.0f);
     }
 }
 
@@ -2585,6 +2631,8 @@ void Screen::draw_tile(const ui::Fonts &fonts, int k, unsigned layers)
     const bool by_downloads = app.downloads && discover() && !shelves_.empty() &&
                               shelves_[static_cast<std::size_t>(shelf_of(k))].downloaded;
     const bool placed = ranked || by_downloads;
+    // On a developer's page every tile has the same author: it says its downloads instead.
+    const bool dev_downloads = !by_downloads && !ranked && app.downloads && !developer_.empty();
     if (placed && marks > 0.01f)
     {
         if (layers & kShapes)
@@ -2640,7 +2688,7 @@ void Screen::draw_tile(const ui::Fonts &fonts, int k, unsigned layers)
                      likes_text(counts->likes) + "  \xC2\xB7  " + comments_text(counts->comments),
                      x + 20.0f, r.y + r.h - 16.0f, 18, kInk.with_alpha(0.8f * foot));
     }
-    else if (by_downloads)
+    else if (by_downloads || dev_downloads)
     {
         if (layers & kShapes)
             download_sign(list, x, r.y + r.h - 22.0f, 12.0f, kAccent.with_alpha(foot));
@@ -4658,8 +4706,11 @@ void Screen::draw_panel(const ui::Fonts &fonts, std::uint32_t glass)
     // gold line gliding under it; L1 / R1 at the ends.
     list.rotated_rect({kMargin + 2.0f, kRoomsY - 11.0f, 22.0f, 22.0f}, 5.0f, 0.7854f, kAccent);
     list.rotated_rect({kMargin + 8.0f, kRoomsY - 5.0f, 10.0f, 10.0f}, 2.0f, 0.7854f, kDeep);
-    ui::text(list, fonts.semibold, "PROSPEROSTORE", kMargin + 42.0f, centred(kRoomsY, 22), 22, kInk,
-             gfx::Align::left, 5.0f);
+    const float brand = ui::text(list, fonts.semibold, "PROSPEROSTORE", kMargin + 42.0f,
+                                 centred(kRoomsY, 22), 22, kInk, gfx::Align::left, 5.0f);
+    if (!self_version_.empty())
+        ui::text(list, fonts.semibold, short_version(self_version_), kMargin + 42.0f + brand,
+                 centred(kRoomsY + 22.0f, 11), 11, kInk.with_alpha(0.5f), gfx::Align::right, 2.5f);
     const auto glyphs = ui::GlyphStyle::dark();
     ui::draw_button(list, fonts, glyphs, ui::Button::l1,
                     rooms_[0].x - ui::button_width(ui::Button::l1, 26) - 8.0f, kRoomsY, 26);
