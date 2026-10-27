@@ -727,6 +727,9 @@ const Row kStrings[] = {
     {{"More by this developer", "Más de este desarrollador", "Plus de ce développeur",
       "Mais deste desenvolvedor", "この開発者の他のアプリ", "Mehr von diesem Entwickler",
       "Meer van deze ontwikkelaar", "Bu geliştiricinin diğer uygulamaları", "此开发者的更多应用"}},
+    {{"Most downloaded", "Más descargados", "Les plus téléchargés", "Mais baixados",
+      "ダウンロード数が多い", "Meistgeladen", "Meest gedownload", "En çok indirilenler",
+      "下载最多"}},
     {{"Most liked", "Más votados", "Les plus aimés", "Mais apreciados", "人気", "Beliebteste",
       "Meest geliket", "En çok beğenilenler", "最受欢迎"}},
     {{"Music & audio", "Música y audio", "Musique et audio", "Música e áudio", "音楽・オーディオ",
@@ -1848,6 +1851,12 @@ const Row kStrings[] = {
       "{0} beğeni", "{0} 个点赞"}},
     {{"{0} likes", "{0} me gusta", "{0} j'aime", "{0} gostos", "いいね {0}件", "{0} Likes",
       "{0} likes", "{0} beğeni", "{0} 个点赞"}},
+    {{"{0} total download", "{0} descarga en total", "{0} téléchargement au total",
+      "{0} download no total", "累計ダウンロード {0}件", "{0} Download insgesamt",
+      "{0} download in totaal", "toplam {0} indirme", "共 {0} 次下载"}},
+    {{"{0} total downloads", "{0} descargas en total", "{0} téléchargements au total",
+      "{0} downloads no total", "累計ダウンロード {0}件", "{0} Downloads insgesamt",
+      "{0} downloads in totaal", "toplam {0} indirme", "共 {0} 次下载"}},
     {{"{0} of its {1} helper programs that run outside the sandbox have not been reviewed by the "
       "catalog's maintainers.",
       "{0} de sus {1} programas auxiliares que se ejecutan fuera del sandbox no han sido revisados "

@@ -211,6 +211,22 @@ int main()
     assert(store::catalog::parse_index(shelves, sorted, error));
     assert(sorted[0].category == "emulators" && sorted[1].category.empty() &&
            sorted[2].category.empty());
+    // The developer's GitHub account and the download count: optional, in the index, and a value
+    // this version does not understand is left out, never a reason to refuse the app.
+    const char *counted =
+        R"({"schema":3,"apps":[{"titleid":"PPSA99001","name":"A","kind":"app","status":"available","owner":"darkxex","downloads":1234},)"
+        R"({"titleid":"PPSA99002","name":"B","kind":"app","status":"available","owner":null,"downloads":null},)"
+        R"({"titleid":"PPSA99003","name":"C","kind":"app","status":"available","owner":"a b/c","downloads":-5},)"
+        R"({"titleid":"PPSA99004","name":"D","kind":"app","status":"available","downloads":0},)"
+        R"({"titleid":"PPSA99005","name":"E","kind":"app","status":"available","downloads":"many"}]})";
+    std::vector<store::catalog::Entry> numbered;
+    assert(store::catalog::parse_index(counted, numbered, error) && numbered.size() == 5);
+    assert(numbered[0].owner == "darkxex" && numbered[0].downloads &&
+           *numbered[0].downloads == 1234);
+    assert(numbered[1].owner.empty() && !numbered[1].downloads);
+    assert(numbered[2].owner.empty() && !numbered[2].downloads);
+    assert(numbered[3].owner.empty() && numbered[3].downloads && *numbered[3].downloads == 0);
+    assert(!numbered[4].downloads);
     auto bad_icon = full_icon;
     bad_icon.replace(bad_icon.find("https://prosperostore.net"), 21, "https://untrusted.example");
     assert(parse_detail(bad_icon, "PPSA99000", detail, error)); // Custom HTTPS icon host.

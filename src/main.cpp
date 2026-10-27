@@ -491,6 +491,8 @@ int main()
                                     entry.released, entry.updated});
                     apps.back().available_version = entry.content_version;
                     apps.back().size = entry.size;
+                    apps.back().owner = entry.owner;
+                    apps.back().downloads = entry.downloads;
                     apps.back().added = entry.added;
                     apps.back().category = entry.category;
                     apps.back().extra = entry.extra;

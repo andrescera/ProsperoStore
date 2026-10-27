@@ -272,6 +272,12 @@ void like_sign(gfx::DrawList &list, float x, float cy, float size, Color ink)
     list.triangle({x, cy - size * 0.5f, size, size * 0.9f}, ink);
 }
 
+// The download sign: an arrow head pointing down, the like sign turned over.
+void download_sign(gfx::DrawList &list, float x, float cy, float size, Color ink)
+{
+    list.triangle({x, cy - size * 0.45f, size, size * 0.9f}, ink, 0.0f, 3.14159f);
+}
+
 // The comment sign: a speech bubble.
 void comment_sign(gfx::DrawList &list, float x, float cy, float size, Color ink)
 {
@@ -285,6 +291,22 @@ void comment_sign(gfx::DrawList &list, float x, float cy, float size, Color ink)
 std::string likes_text(std::uint32_t count)
 {
     return trn(count, "{0} like", "{0} likes");
+}
+
+// How many times GitHub has served an app's release file: every download of it, so reinstalls and
+// downloads outside the store are in it. Said as downloads, never as installs.
+std::string downloads_text(std::uint64_t count)
+{
+    return trn(count, "{0} total download", "{0} total downloads");
+}
+
+// What the apps of one developer are grouped under: the GitHub account that owns them (the
+// website's developer page), without regard to case, so one developer who credits themselves two
+// ways is still one. An app the catalog gives no account for (a reservation, a custom catalog)
+// goes under its author's name.
+std::string developer_key(const App &app)
+{
+    return app.owner.empty() ? app.author : folded(app.owner);
 }
 
 std::string comments_text(std::uint32_t count)
@@ -491,7 +513,7 @@ void Screen::rebuild()
         if (!query.empty() && app.folded_name.find(query) == std::string::npos &&
             app.folded_author.find(query) == std::string::npos)
             continue;
-        if (!developer_.empty() && (app.local_only || app.author != developer_))
+        if (!developer_.empty() && (app.local_only || developer_key(app) != developer_))
             continue;
         for (int section = 0; section < kSections; ++section)
             counts_[section] += in_section(app, section) ? 1 : 0;
@@ -505,6 +527,8 @@ void Screen::rebuild()
     };
     if (sort_ == Sort::liked && !social_shown())
         sort_ = Sort::name;
+    if (sort_ == Sort::downloaded && !downloads_known())
+        sort_ = Sort::name;
     std::stable_sort(visible_.begin(), visible_.end(),
                      [&](auto first, auto second)
                      {
@@ -512,6 +536,9 @@ void Screen::rebuild()
                          const auto &b = apps_[second];
                          if (sort_ == Sort::liked && likes(a) != likes(b))
                              return likes(a) > likes(b);
+                         if (sort_ == Sort::downloaded &&
+                             a.downloads.value_or(0) != b.downloads.value_or(0))
+                             return a.downloads.value_or(0) > b.downloads.value_or(0);
                          if (sort_ == Sort::released && a.released != b.released)
                              return a.released > b.released;
                          if (sort_ == Sort::updated && a.updated != b.updated)
@@ -528,7 +555,7 @@ void Screen::rebuild()
         const auto all = visible_;
         visible_.clear();
         // order: 0 as listed, 1 the twelve with the newest releases, 2 the twelve listed last, 3
-        // the ten with the most likes (ties by name).
+        // the ten with the most likes, 4 the ten with the most downloads (ties by name).
         const auto shelf = [&](std::string title, auto keep, int order)
         {
             std::vector<std::size_t> members;
@@ -543,6 +570,20 @@ void Screen::rebuild()
                                      return social::more_liked(
                                          likes(apps_[a]), apps_[a].folded_name, likes(apps_[b]),
                                          apps_[b].folded_name);
+                                 });
+                if (members.size() > social::kMostLiked)
+                    members.resize(social::kMostLiked);
+            }
+            else if (order == 4)
+            {
+                std::stable_sort(members.begin(), members.end(),
+                                 [&](auto a, auto b)
+                                 {
+                                     const auto first = apps_[a].downloads.value_or(0);
+                                     const auto second = apps_[b].downloads.value_or(0);
+                                     return first != second
+                                                ? first > second
+                                                : apps_[a].folded_name < apps_[b].folded_name;
                                  });
                 if (members.size() > social::kMostLiked)
                     members.resize(social::kMostLiked);
@@ -566,6 +607,7 @@ void Screen::rebuild()
             next.start = static_cast<int>(visible_.size());
             next.count = static_cast<int>(members.size());
             next.ranked = order == 3;
+            next.downloaded = order == 4;
             for (const auto &old : previous)
                 if (old.title == next.title)
                 {
@@ -617,6 +659,12 @@ void Screen::rebuild()
         }
         else
             shelf("New and updated", current, 1);
+        // The apps downloaded most, once the catalog counts them (what GitHub has served, so it
+        // is a rough sign of popularity and not of how many consoles have the app).
+        if (downloads_known())
+            shelf(
+                "Most downloaded",
+                [&](const App &a) { return current(a) && a.downloads.value_or(0) > 0; }, 4);
         // The apps people upvoted, in order: there once the likes are known and some app has one.
         if (social_shown())
             shelf("Most liked", [&](const App &a) { return current(a) && likes(a) > 0; }, 3);
@@ -1346,8 +1394,14 @@ void Screen::update_home(const InputFrame &input, ui::Feedback &feedback)
     }
     if (input.is_pressed(Action::r3))
     {
-        // "Most liked" joins the orders once the likes are known.
-        sort_ = static_cast<Sort>((static_cast<unsigned>(sort_) + 1) % (social_shown() ? 4 : 3));
+        // "Most liked" and "Most downloaded" join the orders once their numbers are known.
+        std::vector<Sort> orders{Sort::name, Sort::released, Sort::updated};
+        if (social_shown())
+            orders.push_back(Sort::liked);
+        if (downloads_known())
+            orders.push_back(Sort::downloaded);
+        const auto at = std::find(orders.begin(), orders.end(), sort_);
+        sort_ = at == orders.end() || at + 1 == orders.end() ? orders.front() : *(at + 1);
         focus_ = 0;
         rebuild();
         swap_.start(0.3f);
@@ -1671,8 +1725,7 @@ void Screen::update_page(const InputFrame &input, ui::Feedback &feedback)
     }
     else if (input.is_pressed(Action::r3) && !shown.local_only && !shown.author.empty())
     {
-        const std::string author = shown.author;
-        open_developer(author);
+        open_developer(developer_key(shown), shown.author);
         feedback.play(audio::Cue::select);
     }
     else if (comments_block_ >= 0 &&
@@ -1713,9 +1766,9 @@ void Screen::update_page(const InputFrame &input, ui::Feedback &feedback)
     }
 }
 
-bool Screen::open_developer(const std::string &author)
+bool Screen::open_developer(const std::string &key, const std::string &name)
 {
-    if (author.empty())
+    if (key.empty())
         return false;
     // Their link comes from whichever of their apps has its details here: the page this was
     // opened from, first.
@@ -1724,13 +1777,14 @@ bool Screen::open_developer(const std::string &author)
     developer_support_ = false;
     for (int pass = 0; pass < 2 && developer_link_.empty(); ++pass)
         for (const auto &app : apps_)
-            if (app.author == author && app.detail && (pass == 1 || app.title_id == from))
+            if (developer_key(app) == key && app.detail && (pass == 1 || app.title_id == from))
             {
                 developer_link_ = catalog::developer_link(*app.detail, developer_support_);
                 if (!developer_link_.empty())
                     break;
             }
-    developer_ = author;
+    developer_ = key;
+    developer_name_ = name;
     details_ = false;
     section_ = 0;
     query_.clear();
@@ -2368,15 +2422,31 @@ void Screen::draw_stage(const ui::Fonts &fonts)
 void Screen::draw_section_header(const ui::Fonts &fonts)
 {
     auto &list = scene_;
-    std::string title = !developer_.empty() ? trf("By {0}", {developer_})
+    std::string title = !developer_.empty() ? trf("By {0}", {developer_name_})
                         : query_.empty()    ? std::string(tr(kSectionNames[section_]))
                                             : trf("Results for \"{0}\"", {query_});
     if (!category_.empty() && !categories_here().empty())
         title += " \xC2\xB7 " + category_label(category_);
     const float w = ui::text(list, fonts.display, fonts.display.font->fit(title, 60, 1100.0f),
                              kMargin - 3.0f, kHeaderY, 60, kInk);
-    ui::text(list, fonts.mono, std::to_string(visible_.size()), kMargin + w + 18.0f, kHeaderY, 26,
-             kInk.with_alpha(0.5f));
+    const float count_w = ui::text(list, fonts.mono, std::to_string(visible_.size()),
+                                   kMargin + w + 18.0f, kHeaderY, 26, kInk.with_alpha(0.5f));
+    if (!developer_.empty())
+    {
+        // What the developer's apps have been downloaded, when the catalog counts them.
+        std::uint64_t downloads = 0;
+        bool counted = false;
+        for (const auto index : visible_)
+            if (apps_[index].downloads)
+            {
+                downloads += *apps_[index].downloads;
+                counted = true;
+            }
+        if (counted)
+            ui::text(list, fonts.regular, "\xC2\xB7  " + downloads_text(downloads),
+                     kMargin + w + 18.0f + count_w + 22.0f, kHeaderY + 2.0f, 22,
+                     kInk.with_alpha(0.5f));
+    }
     const bool all = section_ == 6 && !visible_.empty() && installer_ && guard_;
     if (!developer_.empty())
     {
@@ -2409,10 +2479,11 @@ void Screen::draw_section_header(const ui::Fonts &fonts)
     }
     else
     {
-        const std::string_view sort_name = tr(sort_ == Sort::name       ? "Name"
-                                              : sort_ == Sort::released ? "Newest release"
-                                              : sort_ == Sort::liked    ? "Most liked"
-                                                                        : "Recently updated");
+        const std::string_view sort_name = tr(sort_ == Sort::name         ? "Name"
+                                              : sort_ == Sort::released   ? "Newest release"
+                                              : sort_ == Sort::liked      ? "Most liked"
+                                              : sort_ == Sort::downloaded ? "Most downloaded"
+                                                                          : "Recently updated");
         const float tw = ui::text(list, fonts.regular, trf("Sorted by {0}", {sort_name}), kRight,
                                   kHeaderY - 8.0f, 22, kInk.with_alpha(0.6f), gfx::Align::right);
         ui::draw_button(list, fonts, ui::GlyphStyle::dark(), ui::Button::right_stick,
@@ -2509,7 +2580,12 @@ void Screen::draw_tile(const ui::Fonts &fonts, int k, unsigned layers)
     const auto *counts = social_shown() ? counts_of(app) : nullptr;
     const bool ranked = counts && discover() && !shelves_.empty() &&
                         shelves_[static_cast<std::size_t>(shelf_of(k))].ranked;
-    if (ranked && marks > 0.01f)
+    // "Most downloaded": the tile says its place and, in words, how many times it was downloaded;
+    // its likes and comments stay where every tile has them.
+    const bool by_downloads = app.downloads && discover() && !shelves_.empty() &&
+                              shelves_[static_cast<std::size_t>(shelf_of(k))].downloaded;
+    const bool placed = ranked || by_downloads;
+    if (placed && marks > 0.01f)
     {
         if (layers & kShapes)
             list.circle(r.x + 30.0f, r.y + 28.0f, 17.0f, kAccent.with_alpha(marks));
@@ -2519,7 +2595,7 @@ void Screen::draw_tile(const ui::Fonts &fonts, int k, unsigned layers)
                      r.x + 30.0f, centred(r.y + 28.0f, 19), 19, kOnAccent.with_alpha(marks),
                      gfx::Align::center);
     }
-    else if (counts && marks > 0.01f && (layers & (kShapes | kSemibold)))
+    if (!ranked && counts && marks > 0.01f && (layers & (kShapes | kSemibold)))
     {
         const std::string likes = std::to_string(counts->likes),
                           comments = std::to_string(counts->comments);
@@ -2543,7 +2619,7 @@ void Screen::draw_tile(const ui::Fonts &fonts, int k, unsigned layers)
                      kInk.with_alpha(marks));
         }
     }
-    const float mark_x = r.x + 12.0f + (ranked ? 42.0f : 0.0f);
+    const float mark_x = r.x + 12.0f + (placed ? 42.0f : 0.0f);
     if ((working || queued) && marks > 0.01f)
         pill(list, fonts, offer(app).headline, mark_x, r.y + 28.0f, 32.0f, kAccent, kOnAccent,
              marks, layers & (kShapes | kSemibold));
@@ -2563,6 +2639,14 @@ void Screen::draw_tile(const ui::Fonts &fonts, int k, unsigned layers)
             ui::text(list, fonts.regular,
                      likes_text(counts->likes) + "  \xC2\xB7  " + comments_text(counts->comments),
                      x + 20.0f, r.y + r.h - 16.0f, 18, kInk.with_alpha(0.8f * foot));
+    }
+    else if (by_downloads)
+    {
+        if (layers & kShapes)
+            download_sign(list, x, r.y + r.h - 22.0f, 12.0f, kAccent.with_alpha(foot));
+        if (layers & kRegular)
+            ui::text(list, fonts.regular, downloads_text(*app.downloads), x + 20.0f,
+                     r.y + r.h - 16.0f, 18, kInk.with_alpha(0.8f * foot));
     }
     else if (app.badge == "Installed")
     {
@@ -3370,6 +3454,7 @@ void Screen::draw_page(const ui::Fonts &fonts, std::uint32_t glass)
         chip(app.detail->size ? size_text(app.detail->size) : std::string());
         chip(app.detail->license);
         chip(app.detail->format.empty() ? std::string() : ui::upper(app.detail->format));
+        chip(app.downloads ? downloads_text(*app.downloads) : std::string());
         // From a custom catalog shown beside the official one: named on its page.
         chip(!app.detail->extra                  ? std::string()
              : app.detail->catalog_label.empty() ? trs("Custom catalog")

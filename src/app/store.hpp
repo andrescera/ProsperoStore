@@ -16,6 +16,7 @@
 #include "ui/motion.hpp"
 #include "gfx/draw_list.hpp"
 
+#include <algorithm>
 #include <functional>
 #include <tuple>
 #include <map>
@@ -53,6 +54,10 @@ struct App
     bool ambient = false; // the background was made from the icon (make_ambient)
     hui::gfx::Color accent = hui::gfx::Color::rgb(0x42358f);
     std::uint64_t size = 0;
+    // From the catalog's index: the GitHub account the developer is grouped under (empty when the
+    // catalog doesn't say), and how many times GitHub has served the release file (unset: unknown).
+    std::string owner = {};
+    std::optional<std::uint64_t> downloads = {};
     std::string added = {};    // when the catalog first listed it
     std::string category = {}; // its shelf: a catalog category key, or empty
     bool extra = false;        // from the custom catalog: it has no likes or comments
@@ -184,7 +189,7 @@ class Screen
     // A developer's page: every app by one developer, opened from an app's page (R3) and
     // left with Circle. The link is the developer's (catalog::developer_link); the frame
     // loop turns the pending one into a code.
-    bool open_developer(const std::string &author);
+    bool open_developer(const std::string &key, const std::string &name);
     const std::string &developer() const
     {
         return developer_;
@@ -343,7 +348,8 @@ class Screen
         name,
         released,
         updated,
-        liked // offered once the likes are known
+        liked,     // offered once the likes are known
+        downloaded // offered once some app has a download count
     };
     static constexpr int kSections = 7;
     // What the card and the banner print, fitted once per catalog, not per frame.
@@ -431,6 +437,12 @@ class Screen
     bool social_shown() const
     {
         return settings_.show_comments && likes_known_;
+    }
+    // Some app has a download count above zero: the orders and shelves that rank by it are offered.
+    bool downloads_known() const
+    {
+        return std::any_of(apps_.begin(), apps_.end(),
+                           [](const App &app) { return app.downloads.value_or(0) > 0; });
     }
     // An app's counts while they are shown (none listed is zero), else null.
     const social::Counts *counts_of(const App &app) const;
@@ -548,7 +560,9 @@ class Screen
     bool inventory_ready_ = false, catalog_current_ = false;
     std::string query_;
     std::string category_; // the category a grid section is narrowed to; empty for all
-    std::string developer_, developer_link_, developer_qr_link_;
+    // developer_ is the key the apps are grouped by (developer_key); developer_name_ is what the
+    // header says, the author's name on the app the page was opened from.
+    std::string developer_, developer_name_, developer_link_, developer_qr_link_;
     bool developer_support_ = false; // the link is a place to support them
     std::uint32_t developer_qr_ = 0;
     void close_developer();
@@ -580,6 +594,8 @@ class Screen
         std::string title;
         int start = 0, count = 0, pos = 0;
         bool ranked = false; // "Most liked": each tile says its place
+        // "Most downloaded": each tile says its place and its downloads, and keeps its likes.
+        bool downloaded = false;
         hui::ui::Scroller scroll;
     };
     std::vector<Shelf> shelves_;

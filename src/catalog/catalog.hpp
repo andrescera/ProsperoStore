@@ -6,6 +6,7 @@
 #include <array>
 #include <cstdint>
 #include <map>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -91,6 +92,11 @@ struct Entry
     // Optional: the developer's own page and a place to support them (HTTPS addresses).
     std::string author_url, donate_url;
     std::uint64_t size = 0;
+    // From the catalog's index only: the GitHub account the app's developer is grouped under (the
+    // website's developer page), and how many times GitHub has served the release file. Empty and
+    // unset when the catalog doesn't say (a reservation, a custom catalog, an older catalog).
+    std::string owner;
+    std::optional<std::uint64_t> downloads;
     // Not from the catalog's files: set by the store on entries that come from a custom
     // catalog shown beside the official one, with that catalog's name (custom_catalog_label).
     bool extra = false;

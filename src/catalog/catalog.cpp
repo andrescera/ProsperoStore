@@ -174,6 +174,25 @@ bool read_entry(yyjson_val *value, Entry &entry, bool detail)
             return false;
         entry.size = yyjson_get_uint(size);
     }
+    // Optional, and only in the index. Anything this version does not understand is left out: it is
+    // never a reason to refuse the app.
+    entry.owner.clear();
+    if (auto *owner = yyjson_obj_get(value, "owner");
+        owner && yyjson_is_str(owner) && yyjson_get_len(owner) <= 64)
+    {
+        const std::string_view name(yyjson_get_str(owner), yyjson_get_len(owner));
+        const auto account_char = [](unsigned char c)
+        {
+            return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+                   c == '-' || c == '_' || c == '.';
+        };
+        if (std::all_of(name.begin(), name.end(), account_char))
+            entry.owner = std::string(name);
+    }
+    entry.downloads.reset();
+    if (auto *downloads = yyjson_obj_get(value, "downloads");
+        downloads && yyjson_is_uint(downloads) && yyjson_get_uint(downloads) <= 1000000000000ull)
+        entry.downloads = yyjson_get_uint(downloads);
     entry.sandbox = known_word(value, "sandbox", {"stays", "leaves", "unclear"});
     entry.category =
         known_word(value, "category",
